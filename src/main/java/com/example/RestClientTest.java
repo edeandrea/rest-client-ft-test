@@ -15,6 +15,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
 
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
+import io.smallrye.faulttolerance.api.CircuitBreakerName;
 
 @Path("/api/test")
 @RegisterRestClient(configKey = "test-client")
@@ -24,8 +25,8 @@ public interface RestClientTest {
 	@GET
 	@Produces(MediaType.TEXT_PLAIN)
 	@WithSpan(kind = SpanKind.CLIENT, value = "RestClientTest.hello")
-	@CircuitBreaker(requestVolumeThreshold = 8, failureRatio = 0.5, delay = 2, delayUnit = ChronoUnit.SECONDS)
-//  @CircuitBreakerName("hello")
+	@CircuitBreaker(requestVolumeThreshold = 8, failureRatio = 0.5, delay = 20, delayUnit = ChronoUnit.SECONDS)
+  @CircuitBreakerName("hello")
 	@Timeout(value = 2, unit = ChronoUnit.SECONDS)
 	@Retry(maxRetries = 2, delay = 200, delayUnit = ChronoUnit.MILLIS)
 	@Fallback(fallbackMethod = "fallbackHello")

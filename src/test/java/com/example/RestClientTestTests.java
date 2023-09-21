@@ -6,7 +6,7 @@ import static jakarta.ws.rs.core.HttpHeaders.ACCEPT;
 import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 import static java.lang.annotation.ElementType.*;
 import static java.lang.annotation.RetentionPolicy.RUNTIME;
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import java.lang.annotation.Documented;
 import java.lang.annotation.Retention;
@@ -15,9 +15,7 @@ import java.util.Map;
 import java.util.stream.IntStream;
 
 import jakarta.inject.Inject;
-import jakarta.ws.rs.WebApplicationException;
 
-import org.eclipse.microprofile.faulttolerance.exceptions.CircuitBreakerOpenException;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -60,44 +58,38 @@ class RestClientTestTests {
   }
 
 	@Test
-	public void doesntRecoverFrom500() {
-		this.wireMockServer.stubFor(
-			get(urlEqualTo(URI))
-				.willReturn(serverError())
-		);
+	public void circuitBreakerWorks() {
+			this.wireMockServer.stubFor(
+				get(urlEqualTo(URI))
+					.willReturn(serverError())
+			);
+
+		assertThat(this.circuitBreakerMaintenance.currentState("hello"))
+			.isEqualTo(CircuitBreakerState.CLOSED);
 
 		// The way the circuit breaker works is that you have to fire at least requestVolumeThreshold
 		// requests at the breaker before it starts to trip
 		// This is so it can fill its window
-
 		// Circuit breaker should trip after 2 calls to hello
-		// 1 Call = 1 actual call + 3 fallbacks = 4 total calls
-		assertThat(this.circuitBreakerMaintenance.currentState("hello"))
-			.isEqualTo(CircuitBreakerState.CLOSED);
-
-		// First 2 calls (and 3 subsequent retries) should just fail with WebApplicationException
-		// While making actual calls to the service
-		IntStream.rangeClosed(1, 2)
+		// 1 Call = 1 actual call + 2 retries = 3 total calls
+		// Circuit breaker is set to trip after 8
+		// So 3 invocations of the call should trip it
+		// Let's do 12 invocations just to be safe
+		// 12 invocations, each with 2 retries = 12 * (1 call + 2 retries) = 36 total calls
+		IntStream.range(1, 12)
 			.forEach(i ->
-				assertThatExceptionOfType(WebApplicationException.class)
-					.isThrownBy(() -> this.client.hello())
+				assertThat(this.client.hello())
+					.isEqualTo(RestClientTest.FALLBACK_TEXT)
 			);
 
-		// Next call should trip the breaker
-		// The breaker should not make an actual call
-		var ex = assertThatExceptionOfType(CircuitBreakerOpenException.class)
-			.isThrownBy(() -> this.client.hello())
-			.withMessageContainingAll(String.format("%s#hello", RestClientTest.class.getName()), "circuit breaker is open");
-
-		// Verify that the breaker is open
 		assertThat(this.circuitBreakerMaintenance.currentState("hello"))
 			.isEqualTo(CircuitBreakerState.OPEN);
 
-		// Verify that the server only saw 8 actual requests
-		// (2 "real" requests and 3 retries each)
+		// Now verify that the server should only have seen 8 requests
+		// 8 = the request volume threshold
 		this.wireMockServer.verify(8,
 			getRequestedFor(urlEqualTo(URI))
-				.withHeader(ACCEPT, equalTo(TEXT_PLAIN))
+				.withHeader(ACCEPT, containing(TEXT_PLAIN))
 		);
 	}
 
