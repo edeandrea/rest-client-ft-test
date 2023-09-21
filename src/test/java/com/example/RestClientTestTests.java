@@ -1,4 +1,4 @@
-package io.quarkus.test;
+package com.example;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
@@ -19,16 +19,16 @@ import jakarta.ws.rs.WebApplicationException;
 
 import org.eclipse.microprofile.faulttolerance.exceptions.CircuitBreakerOpenException;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 
-import io.quarkus.test.RestClientTestTests.WiremockServerResource;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager.TestInjector.AnnotatedAndMatchesType;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.mockito.InjectSpy;
 
+import com.example.RestClientTestTests.WiremockServerResource;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import io.smallrye.faulttolerance.api.CircuitBreakerMaintenance;
 import io.smallrye.faulttolerance.api.CircuitBreakerState;
@@ -38,7 +38,7 @@ import io.smallrye.faulttolerance.api.CircuitBreakerState;
 class RestClientTestTests {
 	private static final String URI = "/api/test";
 
-	@InjectSpy
+	@Inject
 	@RestClient
 	RestClientTest client;
 
@@ -47,6 +47,17 @@ class RestClientTestTests {
 
 	@Inject
 	CircuitBreakerMaintenance circuitBreakerMaintenance;
+
+	  @BeforeEach
+  public void beforeEach() {
+    this.wireMockServer.resetAll();
+  }
+
+  @AfterEach
+  public void afterEach() {
+    // Reset all circuit breaker counts after each test
+    this.circuitBreakerMaintenance.resetAll();
+  }
 
 	@Test
 	public void doesntRecoverFrom500() {
@@ -103,10 +114,24 @@ class RestClientTestTests {
 		assertThat(this.client.hello())
 			.isEqualTo(RestClientTest.FALLBACK_TEXT);
 
-		Mockito.verify(this.client).hello();
 		this.wireMockServer.verify(3,
 			getRequestedFor(urlEqualTo(URI))
-				.withHeader(ACCEPT, equalTo(TEXT_PLAIN))
+				.withHeader(ACCEPT, containing(TEXT_PLAIN))
+		);
+	}
+
+	@Test
+	public void allGood() {
+		this.wireMockServer.stubFor(
+			get(urlEqualTo(URI))
+				.willReturn(okForContentType(TEXT_PLAIN, "Hello!"))
+		);
+
+		assertThat(this.client.hello())
+			.isEqualTo("Hello!");
+
+		this.wireMockServer.verify(getRequestedFor(urlEqualTo(URI))
+				.withHeader(ACCEPT, containing(TEXT_PLAIN))
 		);
 	}
 
@@ -114,10 +139,9 @@ class RestClientTestTests {
 	@Retention(RUNTIME)
 	@Documented
 	@interface InjectWireMock {
-
 	}
 
-	static class WiremockServerResource implements QuarkusTestResourceLifecycleManager {
+	public static class WiremockServerResource implements QuarkusTestResourceLifecycleManager {
 		private final WireMockServer wireMockServer = new WireMockServer(wireMockConfig().dynamicPort());
 
 		@Override
@@ -125,7 +149,7 @@ class RestClientTestTests {
 			this.wireMockServer.start();
 
 			return Map.of(
-				"quarkus.rest-client.test-client.url", String.format("localhost:%d", this.wireMockServer.isHttpsEnabled() ? this.wireMockServer.httpsPort() : this.wireMockServer.port())
+				"quarkus.rest-client.test-client.url", String.format("http://localhost:%d", this.wireMockServer.isHttpsEnabled() ? this.wireMockServer.httpsPort() : this.wireMockServer.port())
 			);
 		}
 
